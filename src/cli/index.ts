@@ -10,7 +10,7 @@ import {
   notifyChatComplete,
   notifyUserActionRequired,
 } from "../events/handlers.js";
-import { MacOsNotifier } from "../notifications/macos.js";
+import { createDefaultNotifier } from "../notifications/fallback.js";
 import type { Notifier } from "../notifications/types.js";
 import {
   installClaude,
@@ -63,7 +63,7 @@ function runConfig(command: "install" | "uninstall", flags: string[]): void {
 
 async function main(): Promise<void> {
   const [command, ...rest] = process.argv.slice(2);
-  const deps = { notifier: new MacOsNotifier(), cwd: process.cwd() };
+  const deps = { notifier: createDefaultNotifier(), cwd: process.cwd() };
 
   switch (command) {
     case "claude-hook":

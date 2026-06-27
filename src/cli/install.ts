@@ -1,5 +1,5 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const HOOK_MARKER = "dist/cli/index.js";
@@ -16,6 +16,10 @@ export function resolveCliEntry(): string {
 
 export function claudeCommand(cliEntry: string): string {
   return `node ${cliEntry} claude-hook`;
+}
+
+export function installModuleDirectRunMessage(): string {
+  return "dist/cli/install.js is a helper module. Run: node dist/cli/index.js install [--claude|--codex]";
 }
 
 function backupIfExists(path: string): string | undefined {
@@ -107,26 +111,58 @@ export function uninstallClaude(settingsPath: string): InstallResult {
 }
 
 const NOTIFY_RE = /^[ \t]*notify[ \t]*=.*$/m;
+const TABLE_HEADER_RE = /^[ \t]*\[\[?[^\]\r\n]+\]\]?[ \t]*(?:#.*)?$/m;
 
 function codexNotifyLine(cliEntry: string): string {
   return `notify = ["node", ${JSON.stringify(cliEntry)}, "codex-hook"]`;
 }
 
+function firstTableIndex(raw: string): number | undefined {
+  return raw.match(TABLE_HEADER_RE)?.index;
+}
+
+function rootSection(raw: string): string {
+  const tableIndex = firstTableIndex(raw);
+  return tableIndex === undefined ? raw : raw.slice(0, tableIndex);
+}
+
+function removeLineAt(raw: string, start: number): string {
+  const lineEnd = raw.indexOf("\n", start);
+  return lineEnd === -1 ? raw.slice(0, start) : raw.slice(0, start) + raw.slice(lineEnd + 1);
+}
+
+function insertRootNotify(raw: string, notifyLine: string): string {
+  const tableIndex = firstTableIndex(raw);
+  if (tableIndex === undefined) {
+    return raw.length === 0 || raw.endsWith("\n") ? `${raw}${notifyLine}\n` : `${raw}\n${notifyLine}\n`;
+  }
+
+  const beforeTable = raw.slice(0, tableIndex);
+  const tableAndAfter = raw.slice(tableIndex);
+  const prefix = beforeTable.length === 0 || beforeTable.endsWith("\n") ? beforeTable : `${beforeTable}\n`;
+  return `${prefix}${notifyLine}\n\n${tableAndAfter}`;
+}
+
 export function installCodex(configPath: string, cliEntry: string): InstallResult {
   const raw = existsSync(configPath) ? readFileSync(configPath, "utf8") : "";
   const notifyLine = codexNotifyLine(cliEntry);
-  const match = raw.match(NOTIFY_RE);
+  const rootMatch = rootSection(raw).match(NOTIFY_RE);
 
   let next: string;
-  if (!match) {
-    next = raw.length === 0 || raw.endsWith("\n") ? `${raw}${notifyLine}\n` : `${raw}\n${notifyLine}\n`;
-  } else if (match[0].includes(HOOK_MARKER)) {
+  if (rootMatch?.[0].includes(HOOK_MARKER)) {
     next = raw.replace(NOTIFY_RE, notifyLine);
-  } else {
+  } else if (rootMatch) {
     return {
       changed: false,
       message: `Codex already has a 'notify' in ${configPath}; left unchanged.\nTo use notify-cli, set:\n  ${notifyLine}`,
     };
+  } else {
+    const markerMatch = raw.match(NOTIFY_RE);
+    const withoutMisplacedMarker =
+      markerMatch?.[0].includes(HOOK_MARKER) && markerMatch.index !== undefined
+        ? removeLineAt(raw, markerMatch.index)
+        : raw;
+    next = insertRootNotify(withoutMisplacedMarker, notifyLine);
   }
 
   const backupPath = backupIfExists(configPath);
@@ -150,4 +186,12 @@ export function uninstallCodex(configPath: string): InstallResult {
   const next = raw.replace(new RegExp(`${NOTIFY_RE.source}\\n?`, "m"), "");
   writeFile(configPath, next);
   return { changed: true, message: `Removed notify from ${configPath}.` };
+}
+
+const invokedDirectly =
+  process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (invokedDirectly) {
+  console.error(installModuleDirectRunMessage());
+  process.exitCode = 1;
 }

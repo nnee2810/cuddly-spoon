@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   claudeCommand,
+  installModuleDirectRunMessage,
   installClaude,
   installCodex,
   uninstallClaude,
@@ -28,6 +29,14 @@ afterEach(() => {
 describe("claudeCommand", () => {
   it("builds the node invocation", () => {
     expect(claudeCommand(CLI)).toBe(`node ${CLI} claude-hook`);
+  });
+});
+
+describe("installModuleDirectRunMessage", () => {
+  it("points direct install module runs at the CLI install command", () => {
+    expect(installModuleDirectRunMessage()).toBe(
+      "dist/cli/install.js is a helper module. Run: node dist/cli/index.js install [--claude|--codex]",
+    );
   });
 });
 
@@ -116,6 +125,38 @@ describe("installCodex", () => {
     expect(text).toContain('model = "o3"');
     expect(text).toContain(`notify = ["node", "${CLI}", "codex-hook"]`);
     expect(text).not.toContain("/old/repo");
+  });
+
+  it("inserts notify before the first table when no root notify exists", () => {
+    const path = join(tmp(), "config.toml");
+    writeFileSync(
+      path,
+      `[notice.model_migrations]\n"gpt-5.3-codex" = "gpt-5.5"\n"gpt-5.4" = "gpt-5.5"\n`,
+    );
+
+    const result = installCodex(path, CLI);
+
+    const text = readFileSync(path, "utf8");
+    expect(result.changed).toBe(true);
+    expect(text).toBe(
+      `notify = ["node", "${CLI}", "codex-hook"]\n\n[notice.model_migrations]\n"gpt-5.3-codex" = "gpt-5.5"\n"gpt-5.4" = "gpt-5.5"\n`,
+    );
+  });
+
+  it("moves a misplaced notify-cli marker from a table to the root", () => {
+    const path = join(tmp(), "config.toml");
+    writeFileSync(
+      path,
+      `[notice.model_migrations]\n"gpt-5.3-codex" = "gpt-5.5"\nnotify = ["node", "/old/repo/dist/cli/index.js", "codex-hook"]\n`,
+    );
+
+    const result = installCodex(path, CLI);
+
+    const text = readFileSync(path, "utf8");
+    expect(result.changed).toBe(true);
+    expect(text).toBe(
+      `notify = ["node", "${CLI}", "codex-hook"]\n\n[notice.model_migrations]\n"gpt-5.3-codex" = "gpt-5.5"\n`,
+    );
   });
 
   it("does not overwrite a user-owned notify", () => {

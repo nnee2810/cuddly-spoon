@@ -4,7 +4,8 @@
   "description": "MCP stdio server that sends local OS notifications for Claude and Codex events.",
   "type": "module",
   "bin": {
-    "mcp-notification-server": "./dist/index.js"
+    "mcp-notification-server": "./dist/index.js",
+    "notify-cli": "./dist/cli/index.js"
   },
   "files": [
     "dist",
